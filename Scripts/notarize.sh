@@ -21,13 +21,14 @@ rm /tmp/cert.p12
 
 # ── Sign ──────────────────────────────────────────────────────────────────────
 # Sign nested frameworks individually before signing the app (--deep is unreliable)
+# --timestamp is required for notarization
 find "$APP/Contents/Frameworks" -name "*.framework" 2>/dev/null | while read -r fw; do
-    codesign --force --options runtime \
+    codesign --force --options runtime --timestamp \
         --sign "Developer ID Application" \
         "$fw"
 done
 
-codesign --force --options runtime \
+codesign --force --options runtime --timestamp \
     --sign "Developer ID Application" \
     "$APP"
 
