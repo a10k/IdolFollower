@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import UniformTypeIdentifiers
 
 final class WindowManager: NSObject {
     static let shared = WindowManager()
@@ -40,12 +41,17 @@ final class WindowManager: NSObject {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.prompt = "Open"
+        panel.allowedContentTypes = Self.supportedUTTypes
         guard panel.runModal() == .OK, let url = panel.url else { return }
         entry.context.modelURL = url
     }
 
+    private static let supportedExtensions = ["usdz", "usda", "usdc", "obj", "dae", "scn", "abc", "ply"]
+    private static let supportedUTTypes: [UTType] = supportedExtensions.compactMap { UTType(filenameExtension: $0) }
+
     func saveAll() {
         saveWorkItem?.cancel()
+        guard !entries.isEmpty else { return }
         persist()
     }
 
@@ -70,7 +76,7 @@ final class WindowManager: NSObject {
 
         contextCancellables[id] = context.objectWillChange
             .debounce(for: .seconds(0.3), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.scheduleSave() }
+            .sink { [weak self] _ in self?.persist() }
     }
 
     private func buildWindow(frame: CGRect) -> NSWindow {
@@ -167,8 +173,13 @@ extension WindowManager: NSWindowDelegate {
         entries[id]?.tracker.stopTracking()
         contextCancellables.removeValue(forKey: id)
         entries.removeValue(forKey: id)
-        persist()
-        if entries.isEmpty { NSApp.terminate(nil) }
+        if entries.isEmpty {
+            // Don't persist — the last debounced save already captured the correct state.
+            // Persisting now would write an empty array and erase all memory.
+            NSApp.terminate(nil)
+        } else {
+            persist()
+        }
     }
 }
 

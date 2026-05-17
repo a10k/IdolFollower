@@ -23,9 +23,13 @@ The first time macOS asks you to confirm, right-click the app and choose **Open*
 | Right-click drag | Rotate base orientation (saved) |
 | Scroll or pinch | Resize the window |
 | Drag | Move the window |
-| ⌘O | Load a new 3D file |
+| ⌘N | New window |
+| ⌘O | Load a 3D file into this window |
+| ⌘W | Close window |
 | ⌘Q | Quit |
+
+Window positions and models are saved and restored on relaunch.
 
 ## Supported formats
 
-USDZ · OBJ · DAE · SCN · ABC · PLY
+USDZ · USDA · USDC · OBJ · DAE · SCN · ABC · PLY
