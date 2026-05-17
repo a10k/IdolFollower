@@ -1,18 +1,9 @@
 import AppKit
 import Combine
 
-class MouseTracker: ObservableObject {
-    // Live parallax driven by mouse position
+final class MouseTracker: ObservableObject {
     @Published var rotationX: Double = 0
     @Published var rotationY: Double = 0
-
-    // Persistent base orientation set via right-drag
-    @Published var baseRotationX: Double = UserDefaults.standard.double(forKey: "baseRotX") {
-        didSet { UserDefaults.standard.set(baseRotationX, forKey: "baseRotX") }
-    }
-    @Published var baseRotationY: Double = UserDefaults.standard.double(forKey: "baseRotY") {
-        didSet { UserDefaults.standard.set(baseRotationY, forKey: "baseRotY") }
-    }
 
     weak var window: NSWindow?
     private var timer: Timer?
@@ -30,8 +21,13 @@ class MouseTracker: ObservableObject {
     }
 
     private func update() {
-        guard let screen = NSScreen.main, let window = window else { return }
+        guard let window else { return }
         let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) }
+            ?? window.screen
+            ?? NSScreen.main
+        guard let screen else { return }
+
         let dx = mouse.x - window.frame.midX
         let dy = mouse.y - window.frame.midY
         let maxAngle = 25.0

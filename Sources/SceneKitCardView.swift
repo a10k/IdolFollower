@@ -3,73 +3,54 @@ import SceneKit
 
 struct SceneKitView: NSViewRepresentable {
     @EnvironmentObject var tracker: MouseTracker
+    @EnvironmentObject var windowContext: WindowContext
     var viewSize: CGSize
     var debug: DebugState
 
     // MARK: - Coordinator
 
-    class Coordinator: NSObject, SCNSceneRendererDelegate {
+    final class Coordinator: NSObject, SCNSceneRendererDelegate {
         var lastSize: CGSize = .zero
         var pendingFit = false
         var didInitialFit = false
+        var lastModelURL: URL? = nil  // tracks what's currently loaded; avoids redundant reloads
         weak var sv: SCNView?
         var debug: DebugState?
-        weak var tracker: MouseTracker?
+        weak var windowContext: WindowContext?
 
-        // Right-drag base rotation state
         private var dragOrigin: CGPoint = .zero
         private var dragStartBaseX: Double = 0
         private var dragStartBaseY: Double = 0
 
         func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
-            guard !didInitialFit, let sv, let dbg = debug else { return }
+            guard !didInitialFit, let sv, let debug else { return }
             didInitialFit = true
-            DispatchQueue.main.async { SceneKitView.measureAndFit(in: sv, debug: dbg) }
-        }
-
-        func startObservingModelChanges() {
-            NotificationCenter.default.addObserver(self, selector: #selector(reloadModel(_:)),
-                                                   name: .modelURLChanged, object: nil)
-        }
-
-        @objc func reloadModel(_ note: Notification) {
-            guard let url = note.object as? URL, let sv = sv, let dbg = debug else { return }
-            let scene = SceneKitView.makeScene(url: url)
-            sv.scene = scene
-            if let cam = scene.rootNode.childNode(withName: "camera", recursively: false) {
-                sv.pointOfView = cam
-            }
-            didInitialFit = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                SceneKitView.measureAndFit(in: sv, debug: dbg)
-            }
+            DispatchQueue.main.async { SceneKitView.measureAndFit(in: sv, debug: debug) }
         }
 
         @objc func handlePinch(_ gr: NSMagnificationGestureRecognizer) {
             guard let window = sv?.window else { return }
             let scale = 1 + gr.magnification
             gr.magnification = 0
-            resizeWindow(window, by: scale)
+            resize(window, by: scale)
         }
 
         func beginBaseRotationDrag(at point: CGPoint) {
             dragOrigin = point
-            dragStartBaseX = tracker?.baseRotationX ?? 0
-            dragStartBaseY = tracker?.baseRotationY ?? 0
+            dragStartBaseX = windowContext?.baseRotX ?? 0
+            dragStartBaseY = windowContext?.baseRotY ?? 0
         }
 
         func updateBaseRotationDrag(to point: CGPoint) {
             let dx = Double(point.x - dragOrigin.x)
             let dy = Double(point.y - dragOrigin.y)
-            tracker?.baseRotationY = dragStartBaseY + dx * 0.4
-            tracker?.baseRotationX = dragStartBaseX - dy * 0.4
+            windowContext?.baseRotY = dragStartBaseY + dx * 0.4
+            windowContext?.baseRotX = dragStartBaseX - dy * 0.4
         }
 
-        func resizeWindow(_ window: NSWindow, by scale: CGFloat) {
-            let minSide: CGFloat = 150
-            let maxSide: CGFloat = 1200
-            let newW = (window.frame.width  * scale).clamped(to: minSide...maxSide)
-            let newH = (window.frame.height * scale).clamped(to: minSide...maxSide)
+        func resize(_ window: NSWindow, by scale: CGFloat) {
+            let newW = (window.frame.width  * scale).clamped(to: 150...1200)
+            let newH = (window.frame.height * scale).clamped(to: 150...1200)
             let cx = window.frame.midX, cy = window.frame.midY
             window.setFrame(CGRect(x: cx - newW/2, y: cy - newH/2, width: newW, height: newH), display: true)
         }
@@ -81,10 +62,11 @@ struct SceneKitView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SCNView {
         let coord = context.coordinator
-        coord.tracker = tracker
-        coord.startObservingModelChanges()
+        coord.windowContext = windowContext
+        coord.lastModelURL = windowContext.modelURL  // prevent redundant reload on first updateNSView
+
         let sv = IdolSCNView(coordinator: coord)
-        sv.scene = Self.makeScene(url: Self.savedModelURL())
+        sv.scene = Self.makeScene(url: windowContext.modelURL)
         sv.backgroundColor = .clear
         sv.antialiasingMode = .multisampling4X
         sv.allowsCameraControl = false
@@ -106,21 +88,41 @@ struct SceneKitView: NSViewRepresentable {
     }
 
     func updateNSView(_ sv: SCNView, context: Context) {
+        let coord = context.coordinator
+        coord.windowContext = windowContext
+
+        // Reload scene when the model URL changes
+        let newURL = windowContext.modelURL
+        if newURL != coord.lastModelURL {
+            coord.lastModelURL = newURL
+            let scene = Self.makeScene(url: newURL)
+            sv.scene = scene
+            if let cam = scene.rootNode.childNode(withName: "camera", recursively: false) {
+                sv.pointOfView = cam
+            }
+            coord.pendingFit = false
+            let dbg = debug
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                SceneKitView.measureAndFit(in: sv, debug: dbg)
+            }
+        }
+
+        // Apply combined rotation: persistent base + live parallax
         if let model = sv.scene?.rootNode.childNode(withName: "model", recursively: false) {
-            let xr = Float((tracker.baseRotationX + tracker.rotationX) * .pi / 180)
-            let yr = Float((tracker.baseRotationY + tracker.rotationY) * .pi / 180)
+            let xr = Float((windowContext.baseRotX + tracker.rotationX) * .pi / 180)
+            let yr = Float((windowContext.baseRotY + tracker.rotationY) * .pi / 180)
             SCNTransaction.begin()
             SCNTransaction.animationDuration = 0.12
             model.eulerAngles = SCNVector3(xr, yr, 0)
             SCNTransaction.commit()
         }
 
-        let coord = context.coordinator
-        let dbg = debug
-        if viewSize.width != coord.lastSize.width || viewSize.height != coord.lastSize.height {
+        // Re-fit camera when window is resized
+        if viewSize != coord.lastSize {
             coord.lastSize = viewSize
             guard !coord.pendingFit else { return }
             coord.pendingFit = true
+            let dbg = debug
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 coord.pendingFit = false
                 SceneKitView.measureAndFit(in: sv, debug: dbg)
@@ -130,14 +132,14 @@ struct SceneKitView: NSViewRepresentable {
 
     // MARK: - Silhouette fit
     //
-    // Snapshot against black, scan for non-black pixels to find the exact
-    // screen-space silhouette, then move the camera so the enclosing circle
-    // (centred at the projected model origin, radius = farthest bbox corner)
-    // fits within the shorter viewport dimension.
+    // Snapshot with a black background, scan for non-black pixels to find the
+    // model's screen-space silhouette, then move the camera so the enclosing
+    // circle fills the shorter viewport dimension.
 
     static func measureAndFit(in sv: SCNView, debug: DebugState) {
-        guard let camNode = sv.scene?.rootNode.childNode(withName: "camera", recursively: false),
-              sv.bounds.width > 0, sv.bounds.height > 0 else { return }
+        guard sv.bounds.width > 0, sv.bounds.height > 0,
+              let camNode = sv.scene?.rootNode.childNode(withName: "camera", recursively: false)
+        else { return }
 
         let origBg = sv.scene?.background.contents
         sv.scene?.background.contents = NSColor.black
@@ -163,14 +165,13 @@ struct SceneKitView: NSViewRepresentable {
                     let r = raw.load(fromByteOffset: src,     as: UInt8.self)
                     let g = raw.load(fromByteOffset: src + 1, as: UInt8.self)
                     let b = raw.load(fromByteOffset: src + 2, as: UInt8.self)
-                    if Int(r) + Int(g) + Int(b) > 24 {
-                        if x < minX { minX = x }; if x > maxX { maxX = x }
-                        if y < minY { minY = y }; if y > maxY { maxY = y }
-                        if kDebugOverlay {
-                            let dst = (y * imgW + x) * 4
-                            maskBytes[dst] = 255; maskBytes[dst+1] = 220
-                            maskBytes[dst+2] = 0;  maskBytes[dst+3] = 160
-                        }
+                    guard Int(r) + Int(g) + Int(b) > 24 else { continue }
+                    if x < minX { minX = x }; if x > maxX { maxX = x }
+                    if y < minY { minY = y }; if y > maxY { maxY = y }
+                    if kDebugOverlay {
+                        let dst = (y * imgW + x) * 4
+                        maskBytes[dst] = 255; maskBytes[dst+1] = 220
+                        maskBytes[dst+2] = 0;  maskBytes[dst+3] = 160
                     }
                 }
             }
@@ -178,10 +179,10 @@ struct SceneKitView: NSViewRepresentable {
 
         guard minX < maxX, minY < maxY else { return }
 
-        // Snapshot is in device pixels; sv.bounds is in points.
+        // Snapshot is device pixels; sv.bounds is points.
         let px = sv.window?.backingScaleFactor ?? 1.0
         let center = CGPoint(x: sv.bounds.midX, y: sv.bounds.midY)
-        let corners = [
+        let corners: [CGPoint] = [
             CGPoint(x: CGFloat(minX)/px, y: CGFloat(minY)/px),
             CGPoint(x: CGFloat(maxX)/px, y: CGFloat(minY)/px),
             CGPoint(x: CGFloat(minX)/px, y: CGFloat(maxY)/px),
@@ -198,13 +199,17 @@ struct SceneKitView: NSViewRepresentable {
         SCNTransaction.commit()
 
         if kDebugOverlay {
-            let cs = CGColorSpaceCreateDeviceRGB()
-            let bi = CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)
-            if let prov = CGDataProvider(data: Data(maskBytes) as CFData),
-               let maskCG = CGImage(width: imgW, height: imgH, bitsPerComponent: 8, bitsPerPixel: 32,
-                                    bytesPerRow: imgW * 4, space: cs, bitmapInfo: bi,
-                                    provider: prov, decode: nil, shouldInterpolate: false, intent: .defaultIntent) {
-                debug.maskImage = NSImage(cgImage: maskCG, size: NSSize(width: CGFloat(imgW)/px, height: CGFloat(imgH)/px))
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)
+            if let provider = CGDataProvider(data: Data(maskBytes) as CFData),
+               let maskCG = CGImage(width: imgW, height: imgH,
+                                    bitsPerComponent: 8, bitsPerPixel: 32,
+                                    bytesPerRow: imgW * 4,
+                                    space: colorSpace, bitmapInfo: bitmapInfo,
+                                    provider: provider, decode: nil,
+                                    shouldInterpolate: false, intent: .defaultIntent) {
+                debug.maskImage = NSImage(cgImage: maskCG,
+                                         size: NSSize(width: CGFloat(imgW)/px, height: CGFloat(imgH)/px))
             }
             debug.circleCenter = center
             debug.circleRadius = radius
@@ -213,73 +218,103 @@ struct SceneKitView: NSViewRepresentable {
 
     // MARK: - Scene
 
-    static func savedModelURL() -> URL? {
-        guard let path = UserDefaults.standard.string(forKey: "modelPath") else { return nil }
-        return URL(fileURLWithPath: path)
-    }
-
     static func makeScene(url: URL?) -> SCNScene {
         let scene = SCNScene()
         scene.background.contents = NSColor.clear
 
-        let al = SCNNode(); al.light = { let l = SCNLight(); l.type = .ambient; l.intensity = 450; return l }()
-        let kl = SCNNode(); kl.light = { let l = SCNLight(); l.type = .directional; l.intensity = 1000; return l }(); kl.eulerAngles = SCNVector3(-0.5, 0.4, 0)
-        let fl = SCNNode(); fl.light = { let l = SCNLight(); l.type = .directional; l.intensity = 300; l.color = NSColor(red: 0.7, green: 0.8, blue: 1, alpha: 1); return l }(); fl.eulerAngles = SCNVector3(0.2, -1.2, 0)
-        for n in [al, kl, fl] { scene.rootNode.addChildNode(n) }
+        scene.rootNode.addChildNode(ambientLight(intensity: 450))
+        scene.rootNode.addChildNode(directionalLight(intensity: 1000, euler: SCNVector3(-0.5, 0.4, 0)))
+        scene.rootNode.addChildNode(directionalLight(intensity: 300,
+                                                     color: NSColor(red: 0.7, green: 0.8, blue: 1, alpha: 1),
+                                                     euler: SCNVector3(0.2, -1.2, 0)))
 
-        let model = SCNNode(); model.name = "model"
-        var loaded = false
+        let model = SCNNode()
+        model.name = "model"
 
-        if let url = url,
-           let ms = try? SCNScene(url: url, options: [.checkConsistency: false]) {
-            for child in ms.rootNode.childNodes { model.addChildNode(child) }
+        let loaded: Bool
+        if let url,
+           FileManager.default.fileExists(atPath: url.path),
+           let source = try? SCNScene(url: url, options: [.checkConsistency: false]) {
+            source.rootNode.childNodes.forEach { model.addChildNode($0) }
             normalizeModel(model)
             loaded = true
+        } else {
+            loaded = false
         }
 
         if !loaded {
-            let g = SCNPyramid(width: 1.4, height: 1.8, length: 1.4)
-            g.firstMaterial?.diffuse.contents = NSColor.systemIndigo
-            model.addChildNode(SCNNode(geometry: g))
+            let pyramid = SCNPyramid(width: 1.4, height: 1.8, length: 1.4)
+            pyramid.firstMaterial?.diffuse.contents = NSColor.systemIndigo
+            model.addChildNode(SCNNode(geometry: pyramid))
         }
-        scene.rootNode.addChildNode(model)
 
-        let cam = SCNNode(); cam.name = "camera"; cam.camera = SCNCamera()
-        cam.camera!.fieldOfView = 40
-        cam.camera!.zNear = 0.01
-        cam.position = SCNVector3(0, 0, 4)
-        scene.rootNode.addChildNode(cam)
+        scene.rootNode.addChildNode(model)
+        scene.rootNode.addChildNode(camera())
         return scene
+    }
+
+    private static func ambientLight(intensity: CGFloat) -> SCNNode {
+        let light = SCNLight()
+        light.type = .ambient
+        light.intensity = intensity
+        let node = SCNNode()
+        node.light = light
+        return node
+    }
+
+    private static func directionalLight(intensity: CGFloat,
+                                          color: NSColor = .white,
+                                          euler: SCNVector3 = .init(0, 0, 0)) -> SCNNode {
+        let light = SCNLight()
+        light.type = .directional
+        light.intensity = intensity
+        light.color = color
+        let node = SCNNode()
+        node.light = light
+        node.eulerAngles = euler
+        return node
+    }
+
+    private static func camera() -> SCNNode {
+        let cam = SCNCamera()
+        cam.fieldOfView = 40
+        cam.zNear = 0.01
+        let node = SCNNode()
+        node.name = "camera"
+        node.camera = cam
+        node.position = SCNVector3(0, 0, 4)
+        return node
     }
 
     private static func normalizeModel(_ node: SCNNode) {
         let (mn, mx) = node.boundingBox
         let dx = Float(mx.x - mn.x), dy = Float(mx.y - mn.y), dz = Float(mx.z - mn.z)
         guard dx > 0 || dy > 0 || dz > 0 else { return }
-        let s = 2.0 / max(dx, dy, dz)
-        node.pivot = SCNMatrix4MakeTranslation((mn.x+mx.x)/2, (mn.y+mx.y)/2, (mn.z+mx.z)/2)
-        node.scale = SCNVector3(s, s, s)
+        let scale = 2.0 / max(dx, dy, dz)
+        node.pivot = SCNMatrix4MakeTranslation((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2)
+        node.scale = SCNVector3(scale, scale, scale)
         node.position = SCNVector3(0, 0, 0)
     }
 }
 
-// MARK: - SCNView subclass for scroll-wheel zoom
+// MARK: - SCNView subclass
 
-private class IdolSCNView: SCNView {
+private final class IdolSCNView: SCNView {
     weak var coordinator: SceneKitView.Coordinator?
 
     init(coordinator: SceneKitView.Coordinator) {
         self.coordinator = coordinator
         super.init(frame: .zero, options: nil)
     }
-    required init?(coder: NSCoder) { fatalError() }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
 
     override func scrollWheel(with event: NSEvent) {
         guard let window, let coord = coordinator else { return }
         let delta = event.hasPreciseScrollingDeltas
             ? event.scrollingDeltaY * 0.004
             : event.scrollingDeltaY * 0.04
-        coord.resizeWindow(window, by: 1 + delta)
+        coord.resize(window, by: 1 + delta)
     }
 
     override func rightMouseDown(with event: NSEvent) {

@@ -3,15 +3,14 @@ import AppKit
 
 let kDebugOverlay = false
 
-class DebugState: ObservableObject {
-    @Published var maskImage: NSImage? = nil
-    @Published var circleCenter: CGPoint? = nil
+final class DebugState: ObservableObject {
+    @Published var maskImage: NSImage?
+    @Published var circleCenter: CGPoint?
     @Published var circleRadius: CGFloat = 0
 }
 
 struct RootView: View {
-    @EnvironmentObject var tracker: MouseTracker
-    @StateObject var debug = DebugState()
+    @StateObject private var debug = DebugState()
 
     var body: some View {
         GeometryReader { geo in
@@ -19,10 +18,9 @@ struct RootView: View {
                 SceneKitView(viewSize: geo.size, debug: debug)
 
                 if kDebugOverlay {
-                    Canvas { ctx, size in
+                    Canvas { ctx, _ in
                         if let img = debug.maskImage {
-                            let resolved = ctx.resolve(Image(nsImage: img))
-                            ctx.draw(resolved, in: CGRect(origin: .zero, size: size))
+                            ctx.draw(Image(nsImage: img), in: CGRect(origin: .zero, size: geo.size))
                         }
                         if let c = debug.circleCenter, debug.circleRadius > 0 {
                             let r = debug.circleRadius

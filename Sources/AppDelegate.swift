@@ -1,67 +1,60 @@
 import AppKit
-import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var window: NSWindow!
-    let tracker = MouseTracker()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
+        WindowManager.shared.restoreOrCreate()
+    }
 
-        let root = RootView().environmentObject(tracker)
+    func applicationWillTerminate(_ notification: Notification) {
+        WindowManager.shared.saveAll()
+    }
 
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 500),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.level = .floating
-        window.isMovableByWindowBackground = true
-        window.contentView = NSHostingView(rootView: root)
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        window.setFrameAutosaveName("IdolFollowerWindow")
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false  // WindowManager calls NSApp.terminate when the last window closes
+    }
 
-        tracker.window = window
-        tracker.startTracking()
+    // MARK: - Actions
+
+    @objc func newWindow() {
+        WindowManager.shared.openNewWindow()
     }
 
     @objc func changeModel() {
-        let panel = NSOpenPanel()
-        // No UTType filter — most 3D formats aren't registered with macOS.
-        // Unsupported formats fall back to the placeholder sphere gracefully.
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.prompt = "Open"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        UserDefaults.standard.set(url.path, forKey: "modelPath")
-        NotificationCenter.default.post(name: .modelURLChanged, object: url)
+        guard let window = NSApp.keyWindow else { return }
+        WindowManager.shared.changeModel(for: window)
     }
+
+    // MARK: - Menu
 
     private func setupMenu() {
         let menu = NSMenu()
 
         let appItem = NSMenuItem()
         menu.addItem(appItem)
-        let appSub = NSMenu()
-        appItem.submenu = appSub
-        appSub.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let appMenu = NSMenu()
+        appItem.submenu = appMenu
+        appMenu.addItem(NSMenuItem(title: "Quit Idol Follower",
+                                   action: #selector(NSApplication.terminate(_:)),
+                                   keyEquivalent: "q"))
 
         let fileItem = NSMenuItem()
         menu.addItem(fileItem)
-        let fileSub = NSMenu(title: "File")
-        fileItem.submenu = fileSub
-        fileSub.addItem(NSMenuItem(title: "Change Model…", action: #selector(changeModel), keyEquivalent: "o"))
+        let fileMenu = NSMenu(title: "File")
+        fileItem.submenu = fileMenu
+        fileMenu.addItem(NSMenuItem(title: "New Window",
+                                    action: #selector(newWindow),
+                                    keyEquivalent: "n"))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(NSMenuItem(title: "Change Model…",
+                                    action: #selector(changeModel),
+                                    keyEquivalent: "o"))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(NSMenuItem(title: "Close",
+                                    action: #selector(NSWindow.performClose(_:)),
+                                    keyEquivalent: "w"))
 
         NSApp.mainMenu = menu
     }
-
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-}
-
-extension Notification.Name {
-    static let modelURLChanged = Notification.Name("modelURLChanged")
 }
