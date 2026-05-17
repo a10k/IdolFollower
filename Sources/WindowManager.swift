@@ -74,7 +74,7 @@ final class WindowManager: NSObject {
     }
 
     private func buildWindow(frame: CGRect) -> NSWindow {
-        let window = NSWindow(
+        let window = IdolWindow(
             contentRect: frame,
             styleMask: [.borderless],
             backing: .buffered,
@@ -170,4 +170,13 @@ extension WindowManager: NSWindowDelegate {
         persist()
         if entries.isEmpty { NSApp.terminate(nil) }
     }
+}
+
+// MARK: - IdolWindow
+
+// Borderless NSWindows return false from canBecomeKey/canBecomeMain by default,
+// which prevents NSApp.keyWindow from ever being set and breaks menu actions.
+private final class IdolWindow: NSWindow {
+    override var canBecomeKey: Bool  { true }
+    override var canBecomeMain: Bool { true }
 }
