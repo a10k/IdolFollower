@@ -20,7 +20,14 @@ security list-keychain -d user -s "$KC" $(security list-keychain -d user | sed s
 rm /tmp/cert.p12
 
 # ── Sign ──────────────────────────────────────────────────────────────────────
-codesign --force --deep --options runtime \
+# Sign nested frameworks individually before signing the app (--deep is unreliable)
+find "$APP/Contents/Frameworks" -name "*.framework" 2>/dev/null | while read -r fw; do
+    codesign --force --options runtime \
+        --sign "Developer ID Application" \
+        "$fw"
+done
+
+codesign --force --options runtime \
     --sign "Developer ID Application" \
     "$APP"
 
