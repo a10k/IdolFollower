@@ -1,6 +1,5 @@
 import SwiftUI
 import SceneKit
-import GLTFKit2
 
 struct SceneKitView: NSViewRepresentable {
     @EnvironmentObject var tracker: MouseTracker
@@ -231,24 +230,11 @@ struct SceneKitView: NSViewRepresentable {
         let model = SCNNode(); model.name = "model"
         var loaded = false
 
-        if let url = url {
-            let ext = url.pathExtension.lowercased()
-            if ext == "gltf" || ext == "glb" {
-                if let asset = try? GLTFAsset(url: url) {
-                    let source = GLTFSCNSceneSource(asset: asset)
-                    if let ms = source.defaultScene {
-                        for child in ms.rootNode.childNodes { model.addChildNode(child) }
-                        normalizeModel(model)
-                        loaded = true
-                    }
-                }
-            } else {
-                if let ms = try? SCNScene(url: url, options: [.checkConsistency: false]) {
-                    for child in ms.rootNode.childNodes { model.addChildNode(child) }
-                    normalizeModel(model)
-                    loaded = true
-                }
-            }
+        if let url = url,
+           let ms = try? SCNScene(url: url, options: [.checkConsistency: false]) {
+            for child in ms.rootNode.childNodes { model.addChildNode(child) }
+            normalizeModel(model)
+            loaded = true
         }
 
         if !loaded {

@@ -20,14 +20,6 @@ security list-keychain -d user -s "$KC" $(security list-keychain -d user | sed s
 rm /tmp/cert.p12
 
 # ── Sign ──────────────────────────────────────────────────────────────────────
-# Sign nested frameworks individually before signing the app (--deep is unreliable)
-# --timestamp is required for notarization
-find "$APP/Contents/Frameworks" -name "*.framework" 2>/dev/null | while read -r fw; do
-    codesign --force --options runtime --timestamp \
-        --sign "Developer ID Application" \
-        "$fw"
-done
-
 codesign --force --options runtime --timestamp \
     --sign "Developer ID Application" \
     "$APP"
@@ -46,17 +38,14 @@ SUBMIT_OUT=$(xcrun notarytool submit "$ZIP" \
 echo "$SUBMIT_OUT"
 
 SUBMISSION_ID=$(echo "$SUBMIT_OUT" | grep '^\s*id:' | head -1 | awk '{print $2}')
-
 STATUS=$(echo "$SUBMIT_OUT" | grep 'status:' | tail -1 | awk '{print $2}')
+
 if [ "$STATUS" != "Accepted" ]; then
-    echo "Notarization failed with status: $STATUS"
-    if [ -n "$SUBMISSION_ID" ]; then
-        echo "Fetching Apple notarization log for $SUBMISSION_ID..."
-        xcrun notarytool log "$SUBMISSION_ID" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" || true
-    fi
+    echo "Notarization failed: $STATUS"
+    [ -n "$SUBMISSION_ID" ] && xcrun notarytool log "$SUBMISSION_ID" \
+        --apple-id "$APPLE_ID" \
+        --password "$APPLE_ID_PASSWORD" \
+        --team-id "$APPLE_TEAM_ID" || true
     exit 1
 fi
 

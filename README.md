@@ -28,4 +28,4 @@ The first time macOS asks you to confirm, right-click the app and choose **Open*
 
 ## Supported formats
 
-USDZ · OBJ · DAE · GLTF · GLB · SCN · ABC · PLY
+USDZ · OBJ · DAE · SCN · ABC · PLY
