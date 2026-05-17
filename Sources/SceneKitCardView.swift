@@ -214,14 +214,12 @@ struct SceneKitView: NSViewRepresentable {
 
     // MARK: - Scene
 
-    static func savedModelURL() -> URL {
-        if let path = UserDefaults.standard.string(forKey: "modelPath") {
-            return URL(fileURLWithPath: path)
-        }
-        return URL(fileURLWithPath: "/Users/studio257/Downloads/Frank.usdz")
+    static func savedModelURL() -> URL? {
+        guard let path = UserDefaults.standard.string(forKey: "modelPath") else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
-    static func makeScene(url: URL) -> SCNScene {
+    static func makeScene(url: URL?) -> SCNScene {
         let scene = SCNScene()
         scene.background.contents = NSColor.clear
 
@@ -231,23 +229,25 @@ struct SceneKitView: NSViewRepresentable {
         for n in [al, kl, fl] { scene.rootNode.addChildNode(n) }
 
         let model = SCNNode(); model.name = "model"
-        let ext = url.pathExtension.lowercased()
         var loaded = false
 
-        if ext == "gltf" || ext == "glb" {
-            if let asset = try? GLTFAsset(url: url) {
-                let source = GLTFSCNSceneSource(asset: asset)
-                if let ms = source.defaultScene {
+        if let url = url {
+            let ext = url.pathExtension.lowercased()
+            if ext == "gltf" || ext == "glb" {
+                if let asset = try? GLTFAsset(url: url) {
+                    let source = GLTFSCNSceneSource(asset: asset)
+                    if let ms = source.defaultScene {
+                        for child in ms.rootNode.childNodes { model.addChildNode(child) }
+                        normalizeModel(model)
+                        loaded = true
+                    }
+                }
+            } else {
+                if let ms = try? SCNScene(url: url, options: [.checkConsistency: false]) {
                     for child in ms.rootNode.childNodes { model.addChildNode(child) }
                     normalizeModel(model)
                     loaded = true
                 }
-            }
-        } else {
-            if let ms = try? SCNScene(url: url, options: [.checkConsistency: false]) {
-                for child in ms.rootNode.childNodes { model.addChildNode(child) }
-                normalizeModel(model)
-                loaded = true
             }
         }
 
