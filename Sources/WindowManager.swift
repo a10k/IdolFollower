@@ -143,7 +143,7 @@ final class WindowManager: NSObject {
         entries.values.first { $0.window === window }
     }
 
-private func scheduleSave() {
+    private func scheduleSave() {
         saveWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.persist() }
         saveWorkItem = item
@@ -164,7 +164,6 @@ private func scheduleSave() {
                 baseRotZ: e.context.baseRotZ,
                 lockTilt: e.context.lockTilt,
                 lockSpin: e.context.lockSpin,
-                lockRoll: e.context.lockRoll,
                 ignoresMouse: e.context.ignoresMouse,
                 parallaxH: e.context.parallaxH,
                 parallaxV: e.context.parallaxV

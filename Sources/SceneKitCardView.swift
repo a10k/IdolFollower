@@ -1,5 +1,7 @@
 import SwiftUI
+import AppKit
 import SceneKit
+import ImageIO
 
 struct SceneKitView: NSViewRepresentable {
     @EnvironmentObject var tracker: MouseTracker
@@ -17,6 +19,9 @@ struct SceneKitView: NSViewRepresentable {
         weak var sv: SCNView?
         var debug: DebugState?
         weak var windowContext: WindowContext?
+        var gifAnimator: GifAnimator?
+
+        deinit { gifAnimator?.stop() }
 
         // Right-drag axis-lock state
         private enum DragAxis { case horizontal, vertical, diagonal }
@@ -74,9 +79,7 @@ struct SceneKitView: NSViewRepresentable {
                     windowContext?.baseRotX = dragStartBaseX - dy * 0.4
                 }
             case .diagonal:
-                if !(windowContext?.lockRoll ?? false) {
-                    windowContext?.baseRotZ = dragStartBaseZ + dx * 0.4
-                }
+                windowContext?.baseRotZ = dragStartBaseZ + dx * 0.4
             case nil:
                 break
             }
@@ -105,15 +108,16 @@ struct SceneKitView: NSViewRepresentable {
         coord.lastModelURL = windowContext.modelURL  // prevent redundant reload on first updateNSView
 
         let sv = IdolSCNView(coordinator: coord)
-        sv.scene = Self.makeScene(url: windowContext.modelURL)
+        let initialScene = Self.makeScene(url: windowContext.modelURL)
+        sv.scene = initialScene
         sv.backgroundColor = .clear
         sv.wantsLayer = true
         sv.layer?.backgroundColor = .clear
         sv.antialiasingMode = .multisampling4X
         sv.allowsCameraControl = false
-        sv.rendersContinuously = windowContext.modelURL?.pathExtension.lowercased() == "gif"
+        sv.rendersContinuously = windowContext.modelURL?.isGif ?? false
 
-        if let cam = sv.scene?.rootNode.childNode(withName: "camera", recursively: false) {
+        if let cam = initialScene.rootNode.childNode(withName: "camera", recursively: false) {
             sv.pointOfView = cam
         }
 
@@ -121,6 +125,8 @@ struct SceneKitView: NSViewRepresentable {
         coord.debug = debug
         coord.lastSize = viewSize
         sv.delegate = coord
+
+        Self.startGifIfNeeded(coord: coord, scene: initialScene, url: windowContext.modelURL)
 
         let pinch = NSMagnificationGestureRecognizer(target: coord, action: #selector(Coordinator.handlePinch(_:)))
         sv.addGestureRecognizer(pinch)
@@ -136,12 +142,18 @@ struct SceneKitView: NSViewRepresentable {
         let newURL = windowContext.modelURL
         if newURL != coord.lastModelURL {
             coord.lastModelURL = newURL
+            coord.gifAnimator?.stop()
+            coord.gifAnimator = nil
+            coord.didInitialFit = false  // allow delegate to re-trigger fit for new scene
+
             let scene = Self.makeScene(url: newURL)
             sv.scene = scene
-            sv.rendersContinuously = newURL?.pathExtension.lowercased() == "gif"
+            sv.rendersContinuously = newURL?.isGif ?? false
             if let cam = scene.rootNode.childNode(withName: "camera", recursively: false) {
                 sv.pointOfView = cam
             }
+            Self.startGifIfNeeded(coord: coord, scene: scene, url: newURL)
+
             coord.pendingFit = false
             let dbg = debug
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -149,7 +161,7 @@ struct SceneKitView: NSViewRepresentable {
             }
         }
 
-        // Apply rotation — freeze parallax while right-dragging or axis is locked
+        // Apply rotation
         if let model = sv.scene?.rootNode.childNode(withName: "model", recursively: false) {
             let parallaxX = (coord.isDragging || windowContext.lockTilt) ? 0.0 : tracker.rotationX * windowContext.parallaxV
             let parallaxY = (coord.isDragging || windowContext.lockSpin) ? 0.0 : tracker.rotationY * windowContext.parallaxH
@@ -296,9 +308,7 @@ struct SceneKitView: NSViewRepresentable {
         }
 
         if !loaded {
-            let pyramid = SCNPyramid(width: 1.4, height: 1.8, length: 1.4)
-            pyramid.firstMaterial?.diffuse.contents = NSColor.systemIndigo
-            model.addChildNode(SCNNode(geometry: pyramid))
+            model.addChildNode(defaultGeometry())
         }
 
         scene.rootNode.addChildNode(model)
@@ -339,6 +349,51 @@ struct SceneKitView: NSViewRepresentable {
         return node
     }
 
+    private static func defaultGeometry() -> SCNNode {
+        let box = SCNBox(width: 1.4, height: 1.4, length: 1.4, chamferRadius: 0)
+        let faceColors: [NSColor] = [
+            NSColor(red: 0.32, green: 0.18, blue: 0.95, alpha: 1),  // right
+            NSColor(red: 0.20, green: 0.10, blue: 0.70, alpha: 1),  // left
+            NSColor(red: 0.38, green: 0.22, blue: 1.00, alpha: 1),  // top
+            NSColor(red: 0.16, green: 0.08, blue: 0.58, alpha: 1),  // bottom
+            NSColor(red: 0.28, green: 0.15, blue: 0.88, alpha: 1),  // front
+            NSColor(red: 0.22, green: 0.12, blue: 0.75, alpha: 1),  // back
+        ]
+        let symbol = logoSymbol()
+        box.materials = faceColors.map { color in
+            let m = SCNMaterial()
+            m.lightingModel = .blinn
+            m.diffuse.contents  = color
+            m.specular.contents = NSColor(white: 1.0, alpha: 1)
+            m.shininess = 0.97
+            m.emission.contents = symbol   // logo glows at full brightness regardless of lighting angle
+            // Toon snap for diffuse bands; specular highlights (lum > 0.85) pass through untouched
+            m.shaderModifiers = [.fragment: """
+                float lum = dot(_output.color.rgb, vec3(0.299, 0.587, 0.114));
+                float toon = lum > 0.85 ? lum : lum > 0.55 ? 0.65 : lum > 0.20 ? 0.35 : 0.15;
+                _output.color.rgb *= toon / max(lum, 0.001);
+            """]
+            return m
+        }
+        return SCNNode(geometry: box)
+    }
+
+    private static func logoSymbol() -> NSImage? {
+        let canvas: CGFloat = 512
+        let cfg = NSImage.SymbolConfiguration(pointSize: 160, weight: .light)
+            .applying(NSImage.SymbolConfiguration(hierarchicalColor: .white))
+        guard let sym = NSImage(systemSymbolName: "cube.transparent", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg) else { return nil }
+        let image = NSImage(size: NSSize(width: canvas, height: canvas))
+        image.lockFocus()
+        sym.draw(in: NSRect(x: (canvas - sym.size.width)  / 2,
+                            y: (canvas - sym.size.height) / 2,
+                            width:  sym.size.width,
+                            height: sym.size.height))
+        image.unlockFocus()
+        return image
+    }
+
     private static func normalizeModel(_ node: SCNNode) {
         let (mn, mx) = node.boundingBox
         let dx = Float(mx.x - mn.x), dy = Float(mx.y - mn.y), dz = Float(mx.z - mn.z)
@@ -352,66 +407,74 @@ struct SceneKitView: NSViewRepresentable {
     // MARK: - Image / GIF plane
 
     private static func imagePlane(from url: URL) -> SCNNode? {
-        guard let image = NSImage(contentsOf: url) else { return nil }
-        let sz = image.size
-        guard sz.width > 0, sz.height > 0 else { return nil }
+        let cgImage: CGImage?
+        let nsImage: NSImage?
 
-        let plane = SCNPlane(width: sz.width / sz.height, height: 1)
-        let mat = SCNMaterial()
-        mat.lightingModel = .constant   // unlit — don't let directional lights shade the image
-        mat.isDoubleSided = true
-
-        if url.pathExtension.lowercased() == "gif", let layer = makeGifLayer(from: image) {
-            mat.diffuse.contents = layer
+        if url.isGif {
+            let src = CGImageSourceCreateWithURL(url as CFURL, nil)
+            // First frame used as initial texture; GifAnimator swaps frames via timer
+            cgImage = src.flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil as CFDictionary?) }
+            nsImage = nil
         } else {
-            mat.diffuse.contents = image
+            cgImage = nil
+            nsImage = NSImage(contentsOf: url)
         }
 
+        let size: CGSize
+        let contents: Any
+        if let cg = cgImage {
+            size = CGSize(width: cg.width, height: cg.height)
+            contents = cg
+        } else if let img = nsImage {
+            size = img.size
+            contents = img
+        } else {
+            return nil
+        }
+        guard size.width > 0, size.height > 0 else { return nil }
+
+        let plane = SCNPlane(width: size.width / size.height, height: 1)
+        let mat = SCNMaterial()
+        mat.lightingModel = .constant   // unlit — directional lights would shade a flat image badly
+        mat.isDoubleSided = true
+        mat.diffuse.contents = contents
         plane.materials = [mat]
         return SCNNode(geometry: plane)
     }
 
-    // Build a CALayer whose `contents` CAKeyframeAnimation cycles through GIF frames.
-    // SceneKit samples the layer's presentation state each render pass.
-    private static func makeGifLayer(from image: NSImage) -> CALayer? {
-        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
-              let count = rep.value(forProperty: .frameCount) as? Int,
-              count > 1 else { return nil }
+    // MARK: - GIF animation
 
-        var cgFrames: [CGImage] = []
+    private static func startGifIfNeeded(coord: Coordinator, scene: SCNScene, url: URL?) {
+        guard let url, url.isGif else { return }
+        guard let material = scene.rootNode
+            .childNode(withName: "model", recursively: false)?
+            .childNodes.first?.geometry?.firstMaterial else { return }
+        guard let (frames, durations) = extractGifFrames(url: url) else { return }
+        let animator = GifAnimator(frames: frames, durations: durations, material: material)
+        coord.gifAnimator = animator
+        animator.start()
+    }
+
+    private static func extractGifFrames(url: URL) -> (frames: [CGImage], durations: [Double])? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let count = CGImageSourceGetCount(src)
+        guard count > 1 else { return nil }
+
+        var frames: [CGImage] = []
         var durations: [Double] = []
 
         for i in 0..<count {
-            rep.setProperty(.currentFrame, withValue: NSNumber(value: i))
-            let dur = (rep.value(forProperty: .currentFrameDuration) as? Double) ?? 0.1
-            guard let cg = rep.cgImage else { continue }
-            cgFrames.append(cg)
-            durations.append(dur)
+            guard let cg = CGImageSourceCreateImageAtIndex(src, i, nil as CFDictionary?) else { continue }
+            let props = CGImageSourceCopyPropertiesAtIndex(src, i, nil) as? [CFString: Any]
+            let gif   = props?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+            // Prefer unclamped delay (browsers clamp < 20ms to 100ms, we don't need to)
+            let delay = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double)
+                     ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double)
+                     ?? 0.1
+            frames.append(cg)
+            durations.append(max(delay, 0.02))
         }
-
-        guard !cgFrames.isEmpty else { return nil }
-
-        let total = durations.reduce(0, +)
-        var cumulative = 0.0
-        var keyTimes: [NSNumber] = []
-        for dur in durations {
-            keyTimes.append(NSNumber(value: cumulative / total))
-            cumulative += dur
-        }
-
-        let layer = CALayer()
-        layer.frame = CGRect(origin: .zero, size: image.size)
-        layer.contents = cgFrames.first
-
-        let anim = CAKeyframeAnimation(keyPath: "contents")
-        anim.values = cgFrames
-        anim.keyTimes = keyTimes
-        anim.duration = total
-        anim.repeatCount = .infinity
-        anim.calculationMode = .discrete   // jump between frames, no interpolation
-        layer.add(anim, forKey: "gif")
-
-        return layer
+        return frames.isEmpty ? nil : (frames, durations)
     }
 }
 
@@ -460,8 +523,54 @@ private final class IdolSCNView: SCNView {
     }
 }
 
+// MARK: - GIF animator (timer-based; CALayer+CAKeyframeAnimation won't run on a detached layer)
+
+final class GifAnimator {
+    private let frames: [CGImage]
+    private let durations: [Double]
+    private var index = 0
+    private var timer: Timer?
+    private weak var material: SCNMaterial?
+
+    init(frames: [CGImage], durations: [Double], material: SCNMaterial) {
+        self.frames = frames
+        self.durations = durations
+        self.material = material
+    }
+
+    deinit { stop() }
+
+    func start() { schedule() }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func schedule() {
+        let delay = durations[index]
+        let t = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            self?.advance()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func advance() {
+        index = (index + 1) % frames.count
+        material?.diffuse.contents = frames[index]
+        schedule()
+    }
+}
+
+// MARK: - Helpers
+
 private extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)
     }
+}
+
+private extension URL {
+    var isGif: Bool { pathExtension.lowercased() == "gif" }
 }

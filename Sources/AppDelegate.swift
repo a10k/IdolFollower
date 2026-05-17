@@ -53,7 +53,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch sender.tag {
         case 0: ctx.lockTilt.toggle()
         case 1: ctx.lockSpin.toggle()
-        case 2: ctx.lockRoll.toggle()
         default: break
         }
     }
@@ -118,11 +117,11 @@ private final class AppMenuDelegate: NSObject, NSMenuDelegate {
                 sub.addItem(.separator())
 
                 let hSlider = NSMenuItem()
-                hSlider.view = SliderMenuItemView(label: "Left / Right", context: info.context, keyPath: \.parallaxH)
+                hSlider.view = SliderMenuItemView(label: "↔", context: info.context, keyPath: \.parallaxH)
                 sub.addItem(hSlider)
 
                 let vSlider = NSMenuItem()
-                vSlider.view = SliderMenuItemView(label: "Up / Down", context: info.context, keyPath: \.parallaxV)
+                vSlider.view = SliderMenuItemView(label: "↕", context: info.context, keyPath: \.parallaxV)
                 sub.addItem(vSlider)
 
                 sub.addItem(.separator())
@@ -207,7 +206,7 @@ private final class SliderMenuItemView: NSView {
         nameLabel.drawsBackground = false
 
         let slider = NSSlider(value: context[keyPath: keyPath],
-                              minValue: 0, maxValue: 2,
+                              minValue: -2, maxValue: 2,
                               target: self, action: #selector(sliderMoved(_:)))
         slider.controlSize = .small
         slider.isContinuous = true
@@ -220,12 +219,12 @@ private final class SliderMenuItemView: NSView {
         valueLabel.drawsBackground = false
 
         let pad: CGFloat = 14
-        let nameLabelW: CGFloat = 48
-        let valueLabelW: CGFloat = 36
+        let nameLabelW: CGFloat = 20   // single UTF char needs much less space
+        let valueLabelW: CGFloat = 44  // wider to accommodate minus sign
         let sliderW = frame.width - pad - nameLabelW - 6 - valueLabelW - pad
 
-        nameLabel.frame  = NSRect(x: pad,                            y: 7,  width: nameLabelW, height: 16)
-        slider.frame     = NSRect(x: pad + nameLabelW + 6,           y: 5,  width: sliderW,    height: 20)
+        nameLabel.frame  = NSRect(x: pad,                             y: 7, width: nameLabelW, height: 16)
+        slider.frame     = NSRect(x: pad + nameLabelW + 6,            y: 5, width: sliderW,    height: 20)
         valueLabel.frame = NSRect(x: frame.width - pad - valueLabelW, y: 7, width: valueLabelW, height: 16)
 
         addSubview(nameLabel)
@@ -242,6 +241,6 @@ private final class SliderMenuItemView: NSView {
     }
 
     private static func format(_ v: Double) -> String {
-        String(format: "%.1f×", v)
+        String(format: "%+.1f", v)
     }
 }
