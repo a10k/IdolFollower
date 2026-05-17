@@ -32,6 +32,7 @@ struct SceneKitView: NSViewRepresentable {
         private var dragStartBaseY: Double = 0
         private var dragStartBaseZ: Double = 0
         private var dragDetectionDeadline: Date = .distantPast
+        weak var tracker: MouseTracker?
 
         func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
             guard !didInitialFit, let sv, let debug else { return }
@@ -86,6 +87,10 @@ struct SceneKitView: NSViewRepresentable {
         }
 
         func endBaseRotationDrag() {
+            if let ctx = windowContext, let tr = tracker {
+                if !ctx.lockTilt { ctx.baseRotX -= tr.rotationX * ctx.parallaxV }
+                if !ctx.lockSpin { ctx.baseRotY -= tr.rotationY * ctx.parallaxH }
+            }
             isDragging = false
             dragAxisLock = nil
         }
@@ -105,6 +110,7 @@ struct SceneKitView: NSViewRepresentable {
     func makeNSView(context: Context) -> SCNView {
         let coord = context.coordinator
         coord.windowContext = windowContext
+        coord.tracker = tracker
         coord.lastModelURL = windowContext.modelURL  // prevent redundant reload on first updateNSView
 
         let sv = IdolSCNView(coordinator: coord)
@@ -137,6 +143,7 @@ struct SceneKitView: NSViewRepresentable {
     func updateNSView(_ sv: SCNView, context: Context) {
         let coord = context.coordinator
         coord.windowContext = windowContext
+        coord.tracker = tracker
 
         // Reload scene when the model URL changes
         let newURL = windowContext.modelURL
