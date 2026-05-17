@@ -10,6 +10,9 @@ final class WindowContext: ObservableObject {
     @Published var lockTilt: Bool
     @Published var lockSpin: Bool
     @Published var lockRoll: Bool
+    @Published var ignoresMouse: Bool
+    @Published var parallaxH: Double
+    @Published var parallaxV: Double
 
     init(state: WindowState) {
         id = state.id
@@ -19,6 +22,9 @@ final class WindowContext: ObservableObject {
         lockTilt = state.lockTilt
         lockSpin = state.lockSpin
         lockRoll = state.lockRoll
+        ignoresMouse = state.ignoresMouse
+        parallaxH = state.parallaxH
+        parallaxV = state.parallaxV
         if let path = state.modelPath,
            FileManager.default.fileExists(atPath: path) {
             modelURL = URL(fileURLWithPath: path)

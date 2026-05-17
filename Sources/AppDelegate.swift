@@ -38,6 +38,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         (sender.representedObject as? NSWindow)?.close()
     }
 
+    @objc func toggleIgnoresMouse(_ sender: NSMenuItem) {
+        guard let window = sender.representedObject as? NSWindow,
+              let entry = WindowManager.shared.allWindows().first(where: { $0.window === window })
+        else { return }
+        entry.context.ignoresMouse.toggle()
+        window.ignoresMouseEvents = entry.context.ignoresMouse
+    }
+
     @objc func toggleAxisLock(_ sender: NSMenuItem) {
         guard let window = sender.representedObject as? NSWindow,
               let ctx = WindowManager.shared.allWindows().first(where: { $0.window === window })?.context
@@ -109,10 +117,19 @@ private final class AppMenuDelegate: NSObject, NSMenuDelegate {
 
                 sub.addItem(.separator())
 
+                let hSlider = NSMenuItem()
+                hSlider.view = SliderMenuItemView(label: "Left / Right", context: info.context, keyPath: \.parallaxH)
+                sub.addItem(hSlider)
+
+                let vSlider = NSMenuItem()
+                vSlider.view = SliderMenuItemView(label: "Up / Down", context: info.context, keyPath: \.parallaxV)
+                sub.addItem(vSlider)
+
+                sub.addItem(.separator())
+
                 let lockDefs: [(title: String, tag: Int, locked: Bool)] = [
-                    ("Lock Tilt",  0, info.context.lockTilt),
-                    ("Lock Spin",  1, info.context.lockSpin),
-                    ("Lock Roll",  2, info.context.lockRoll),
+                    ("Lock Up / Down",    0, info.context.lockTilt),
+                    ("Lock Left / Right", 1, info.context.lockSpin),
                 ]
                 for def in lockDefs {
                     let lockItem = NSMenuItem(title: def.title,
@@ -123,6 +140,15 @@ private final class AppMenuDelegate: NSObject, NSMenuDelegate {
                     lockItem.state = def.locked ? .on : .off
                     sub.addItem(lockItem)
                 }
+
+                sub.addItem(.separator())
+
+                let ghostItem = NSMenuItem(title: "Invisible to Mouse",
+                                           action: #selector(AppDelegate.toggleIgnoresMouse(_:)),
+                                           keyEquivalent: "")
+                ghostItem.representedObject = info.window
+                ghostItem.state = info.context.ignoresMouse ? .on : .off
+                sub.addItem(ghostItem)
 
                 sub.addItem(.separator())
 
@@ -157,5 +183,65 @@ private final class AppMenuDelegate: NSObject, NSMenuDelegate {
             ]
         ))
         return result
+    }
+}
+
+// MARK: - Slider menu item
+
+private final class SliderMenuItemView: NSView {
+    private weak var context: WindowContext?
+    private let valueLabel: NSTextField
+    private let keyPath: ReferenceWritableKeyPath<WindowContext, Double>
+
+    init(label: String, context: WindowContext, keyPath: ReferenceWritableKeyPath<WindowContext, Double>) {
+        self.context = context
+        self.keyPath = keyPath
+        valueLabel = NSTextField(labelWithString: Self.format(context[keyPath: keyPath]))
+        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 30))
+
+        let nameLabel = NSTextField(labelWithString: label)
+        nameLabel.font = .menuFont(ofSize: 0)
+        nameLabel.textColor = .labelColor
+        nameLabel.isEditable = false
+        nameLabel.isBordered = false
+        nameLabel.drawsBackground = false
+
+        let slider = NSSlider(value: context[keyPath: keyPath],
+                              minValue: 0, maxValue: 2,
+                              target: self, action: #selector(sliderMoved(_:)))
+        slider.controlSize = .small
+        slider.isContinuous = true
+
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.alignment = .right
+        valueLabel.isEditable = false
+        valueLabel.isBordered = false
+        valueLabel.drawsBackground = false
+
+        let pad: CGFloat = 14
+        let nameLabelW: CGFloat = 48
+        let valueLabelW: CGFloat = 36
+        let sliderW = frame.width - pad - nameLabelW - 6 - valueLabelW - pad
+
+        nameLabel.frame  = NSRect(x: pad,                            y: 7,  width: nameLabelW, height: 16)
+        slider.frame     = NSRect(x: pad + nameLabelW + 6,           y: 5,  width: sliderW,    height: 20)
+        valueLabel.frame = NSRect(x: frame.width - pad - valueLabelW, y: 7, width: valueLabelW, height: 16)
+
+        addSubview(nameLabel)
+        addSubview(slider)
+        addSubview(valueLabel)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func sliderMoved(_ sender: NSSlider) {
+        let v = sender.doubleValue
+        if let ctx = context { ctx[keyPath: keyPath] = v }
+        valueLabel.stringValue = Self.format(v)
+    }
+
+    private static func format(_ v: Double) -> String {
+        String(format: "%.1f×", v)
     }
 }

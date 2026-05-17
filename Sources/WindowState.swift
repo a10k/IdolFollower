@@ -14,6 +14,9 @@ struct WindowState: Codable {
     var lockTilt: Bool = false
     var lockSpin: Bool = false
     var lockRoll: Bool = false
+    var ignoresMouse: Bool = false
+    var parallaxH: Double = 1.0
+    var parallaxV: Double = 1.0
 
     var frame: CGRect { CGRect(x: x, y: y, width: width, height: height) }
 }

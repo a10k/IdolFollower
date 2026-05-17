@@ -48,7 +48,8 @@ final class WindowManager: NSObject {
         entry.context.modelURL = url
     }
 
-    private static let supportedExtensions = ["usdz", "usda", "usdc", "obj", "dae", "scn", "abc", "ply"]
+    private static let supportedExtensions = ["usdz", "usda", "usdc", "obj", "dae", "scn", "abc", "ply",
+                                               "png", "jpg", "jpeg", "heic", "tiff", "bmp", "webp", "gif"]
     private static let supportedUTTypes: [UTType] = supportedExtensions.compactMap { UTType(filenameExtension: $0) }
 
     func closeKeyWindow() {
@@ -81,6 +82,7 @@ final class WindowManager: NSObject {
         hostingView.layer?.backgroundColor = .clear
         window.contentView = hostingView
         window.delegate = self
+        window.ignoresMouseEvents = context.ignoresMouse
         tracker.window = window
         tracker.startTracking()
         window.makeKeyAndOrderFront(nil)
@@ -162,7 +164,10 @@ private func scheduleSave() {
                 baseRotZ: e.context.baseRotZ,
                 lockTilt: e.context.lockTilt,
                 lockSpin: e.context.lockSpin,
-                lockRoll: e.context.lockRoll
+                lockRoll: e.context.lockRoll,
+                ignoresMouse: e.context.ignoresMouse,
+                parallaxH: e.context.parallaxH,
+                parallaxV: e.context.parallaxV
             )
         }
         if let data = try? JSONEncoder().encode(states) {

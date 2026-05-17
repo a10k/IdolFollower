@@ -75,7 +75,7 @@ struct SceneKitView: NSViewRepresentable {
                 }
             case .diagonal:
                 if !(windowContext?.lockRoll ?? false) {
-                    windowContext?.baseRotZ = dragStartBaseZ + (dx - dy) * 0.2
+                    windowContext?.baseRotZ = dragStartBaseZ + dx * 0.4
                 }
             case nil:
                 break
@@ -111,7 +111,7 @@ struct SceneKitView: NSViewRepresentable {
         sv.layer?.backgroundColor = .clear
         sv.antialiasingMode = .multisampling4X
         sv.allowsCameraControl = false
-        sv.rendersContinuously = false
+        sv.rendersContinuously = windowContext.modelURL?.pathExtension.lowercased() == "gif"
 
         if let cam = sv.scene?.rootNode.childNode(withName: "camera", recursively: false) {
             sv.pointOfView = cam
@@ -138,6 +138,7 @@ struct SceneKitView: NSViewRepresentable {
             coord.lastModelURL = newURL
             let scene = Self.makeScene(url: newURL)
             sv.scene = scene
+            sv.rendersContinuously = newURL?.pathExtension.lowercased() == "gif"
             if let cam = scene.rootNode.childNode(withName: "camera", recursively: false) {
                 sv.pointOfView = cam
             }
@@ -150,8 +151,8 @@ struct SceneKitView: NSViewRepresentable {
 
         // Apply rotation — freeze parallax while right-dragging or axis is locked
         if let model = sv.scene?.rootNode.childNode(withName: "model", recursively: false) {
-            let parallaxX = (coord.isDragging || windowContext.lockTilt) ? 0.0 : tracker.rotationX
-            let parallaxY = (coord.isDragging || windowContext.lockSpin) ? 0.0 : tracker.rotationY
+            let parallaxX = (coord.isDragging || windowContext.lockTilt) ? 0.0 : tracker.rotationX * windowContext.parallaxV
+            let parallaxY = (coord.isDragging || windowContext.lockSpin) ? 0.0 : tracker.rotationY * windowContext.parallaxH
             let xr = Float((windowContext.baseRotX + parallaxX) * .pi / 180)
             let yr = Float((windowContext.baseRotY + parallaxY) * .pi / 180)
             let zr = Float(windowContext.baseRotZ * .pi / 180)
@@ -276,9 +277,17 @@ struct SceneKitView: NSViewRepresentable {
         model.name = "model"
 
         let loaded: Bool
-        if let url,
-           FileManager.default.fileExists(atPath: url.path),
-           let source = try? SCNScene(url: url, options: [.checkConsistency: false]) {
+        if let url, url.isImageFile {
+            if let planeNode = imagePlane(from: url) {
+                model.addChildNode(planeNode)
+                normalizeModel(model)
+                loaded = true
+            } else {
+                loaded = false
+            }
+        } else if let url,
+                  FileManager.default.fileExists(atPath: url.path),
+                  let source = try? SCNScene(url: url, options: [.checkConsistency: false]) {
             source.rootNode.childNodes.forEach { model.addChildNode($0) }
             normalizeModel(model)
             loaded = true
@@ -338,6 +347,71 @@ struct SceneKitView: NSViewRepresentable {
         node.pivot = SCNMatrix4MakeTranslation((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2)
         node.scale = SCNVector3(scale, scale, scale)
         node.position = SCNVector3(0, 0, 0)
+    }
+
+    // MARK: - Image / GIF plane
+
+    private static func imagePlane(from url: URL) -> SCNNode? {
+        guard let image = NSImage(contentsOf: url) else { return nil }
+        let sz = image.size
+        guard sz.width > 0, sz.height > 0 else { return nil }
+
+        let plane = SCNPlane(width: sz.width / sz.height, height: 1)
+        let mat = SCNMaterial()
+        mat.lightingModel = .constant   // unlit — don't let directional lights shade the image
+        mat.isDoubleSided = true
+
+        if url.pathExtension.lowercased() == "gif", let layer = makeGifLayer(from: image) {
+            mat.diffuse.contents = layer
+        } else {
+            mat.diffuse.contents = image
+        }
+
+        plane.materials = [mat]
+        return SCNNode(geometry: plane)
+    }
+
+    // Build a CALayer whose `contents` CAKeyframeAnimation cycles through GIF frames.
+    // SceneKit samples the layer's presentation state each render pass.
+    private static func makeGifLayer(from image: NSImage) -> CALayer? {
+        guard let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              let count = rep.value(forProperty: .frameCount) as? Int,
+              count > 1 else { return nil }
+
+        var cgFrames: [CGImage] = []
+        var durations: [Double] = []
+
+        for i in 0..<count {
+            rep.setProperty(.currentFrame, withValue: NSNumber(value: i))
+            let dur = (rep.value(forProperty: .currentFrameDuration) as? Double) ?? 0.1
+            guard let cg = rep.cgImage else { continue }
+            cgFrames.append(cg)
+            durations.append(dur)
+        }
+
+        guard !cgFrames.isEmpty else { return nil }
+
+        let total = durations.reduce(0, +)
+        var cumulative = 0.0
+        var keyTimes: [NSNumber] = []
+        for dur in durations {
+            keyTimes.append(NSNumber(value: cumulative / total))
+            cumulative += dur
+        }
+
+        let layer = CALayer()
+        layer.frame = CGRect(origin: .zero, size: image.size)
+        layer.contents = cgFrames.first
+
+        let anim = CAKeyframeAnimation(keyPath: "contents")
+        anim.values = cgFrames
+        anim.keyTimes = keyTimes
+        anim.duration = total
+        anim.repeatCount = .infinity
+        anim.calculationMode = .discrete   // jump between frames, no interpolation
+        layer.add(anim, forKey: "gif")
+
+        return layer
     }
 }
 
