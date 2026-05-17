@@ -10,6 +10,10 @@ struct WindowState: Codable {
     var height: Double
     var baseRotX: Double
     var baseRotY: Double
+    var baseRotZ: Double = 0
+    var lockTilt: Bool = false
+    var lockSpin: Bool = false
+    var lockRoll: Bool = false
 
     var frame: CGRect { CGRect(x: x, y: y, width: width, height: height) }
 }

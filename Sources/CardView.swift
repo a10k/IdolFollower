@@ -33,8 +33,10 @@ struct RootView: View {
                     }
                     .allowsHitTesting(false)
                 }
+
             }
         }
         .ignoresSafeArea()
+        .background(Color.clear)
     }
 }

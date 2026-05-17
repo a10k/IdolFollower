@@ -18,9 +18,15 @@ struct SceneKitView: NSViewRepresentable {
         var debug: DebugState?
         weak var windowContext: WindowContext?
 
+        // Right-drag axis-lock state
+        private enum DragAxis { case horizontal, vertical, diagonal }
+        var isDragging = false
+        private var dragAxisLock: DragAxis? = nil
         private var dragOrigin: CGPoint = .zero
         private var dragStartBaseX: Double = 0
         private var dragStartBaseY: Double = 0
+        private var dragStartBaseZ: Double = 0
+        private var dragDetectionDeadline: Date = .distantPast
 
         func renderer(_ renderer: SCNSceneRenderer, didRenderScene scene: SCNScene, atTime time: TimeInterval) {
             guard !didInitialFit, let sv, let debug else { return }
@@ -39,13 +45,46 @@ struct SceneKitView: NSViewRepresentable {
             dragOrigin = point
             dragStartBaseX = windowContext?.baseRotX ?? 0
             dragStartBaseY = windowContext?.baseRotY ?? 0
+            dragStartBaseZ = windowContext?.baseRotZ ?? 0
+            dragAxisLock = nil
+            isDragging = true
+            dragDetectionDeadline = Date().addingTimeInterval(1.0)
         }
 
         func updateBaseRotationDrag(to point: CGPoint) {
             let dx = Double(point.x - dragOrigin.x)
             let dy = Double(point.y - dragOrigin.y)
-            windowContext?.baseRotY = dragStartBaseY + dx * 0.4
-            windowContext?.baseRotX = dragStartBaseX - dy * 0.4
+
+            if dragAxisLock == nil {
+                guard Date() < dragDetectionDeadline else { return }
+                guard max(abs(dx), abs(dy)) > 6 else { return }
+                let ratio = abs(dx) / max(abs(dy), 0.001)
+                if ratio > 2      { dragAxisLock = .horizontal }
+                else if ratio < 0.5 { dragAxisLock = .vertical }
+                else               { dragAxisLock = .diagonal }
+            }
+
+            switch dragAxisLock {
+            case .horizontal:
+                if !(windowContext?.lockSpin ?? false) {
+                    windowContext?.baseRotY = dragStartBaseY + dx * 0.4
+                }
+            case .vertical:
+                if !(windowContext?.lockTilt ?? false) {
+                    windowContext?.baseRotX = dragStartBaseX - dy * 0.4
+                }
+            case .diagonal:
+                if !(windowContext?.lockRoll ?? false) {
+                    windowContext?.baseRotZ = dragStartBaseZ + (dx - dy) * 0.2
+                }
+            case nil:
+                break
+            }
+        }
+
+        func endBaseRotationDrag() {
+            isDragging = false
+            dragAxisLock = nil
         }
 
         func resize(_ window: NSWindow, by scale: CGFloat) {
@@ -68,6 +107,8 @@ struct SceneKitView: NSViewRepresentable {
         let sv = IdolSCNView(coordinator: coord)
         sv.scene = Self.makeScene(url: windowContext.modelURL)
         sv.backgroundColor = .clear
+        sv.wantsLayer = true
+        sv.layer?.backgroundColor = .clear
         sv.antialiasingMode = .multisampling4X
         sv.allowsCameraControl = false
         sv.rendersContinuously = false
@@ -107,13 +148,16 @@ struct SceneKitView: NSViewRepresentable {
             }
         }
 
-        // Apply combined rotation: persistent base + live parallax
+        // Apply rotation — freeze parallax while right-dragging or axis is locked
         if let model = sv.scene?.rootNode.childNode(withName: "model", recursively: false) {
-            let xr = Float((windowContext.baseRotX + tracker.rotationX) * .pi / 180)
-            let yr = Float((windowContext.baseRotY + tracker.rotationY) * .pi / 180)
+            let parallaxX = (coord.isDragging || windowContext.lockTilt) ? 0.0 : tracker.rotationX
+            let parallaxY = (coord.isDragging || windowContext.lockSpin) ? 0.0 : tracker.rotationY
+            let xr = Float((windowContext.baseRotX + parallaxX) * .pi / 180)
+            let yr = Float((windowContext.baseRotY + parallaxY) * .pi / 180)
+            let zr = Float(windowContext.baseRotZ * .pi / 180)
             SCNTransaction.begin()
-            SCNTransaction.animationDuration = 0.12
-            model.eulerAngles = SCNVector3(xr, yr, 0)
+            SCNTransaction.animationDuration = coord.isDragging ? 0 : 0.12
+            model.eulerAngles = SCNVector3(xr, yr, zr)
             SCNTransaction.commit()
         }
 
@@ -309,6 +353,12 @@ private final class IdolSCNView: SCNView {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // Trigger a SceneKit render pass so newly-exposed pixels aren't left black
+        needsDisplay = true
+    }
+
     override func scrollWheel(with event: NSEvent) {
         guard let window, let coord = coordinator else { return }
         let delta = event.hasPreciseScrollingDeltas
@@ -317,12 +367,22 @@ private final class IdolSCNView: SCNView {
         coord.resize(window, by: 1 + delta)
     }
 
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKeyAndOrderFront(nil)
+        super.mouseDown(with: event)
+    }
+
     override func rightMouseDown(with event: NSEvent) {
+        window?.makeKeyAndOrderFront(nil)
         coordinator?.beginBaseRotationDrag(at: event.locationInWindow)
     }
 
     override func rightMouseDragged(with event: NSEvent) {
         coordinator?.updateBaseRotationDrag(to: event.locationInWindow)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        coordinator?.endBaseRotationDrag()
     }
 }
 

@@ -5,7 +5,9 @@ import UniformTypeIdentifiers
 
 final class WindowManager: NSObject {
     static let shared = WindowManager()
-    private override init() {}
+    private override init() {
+        super.init()
+    }
 
     private struct Entry {
         let window: NSWindow
@@ -49,6 +51,15 @@ final class WindowManager: NSObject {
     private static let supportedExtensions = ["usdz", "usda", "usdc", "obj", "dae", "scn", "abc", "ply"]
     private static let supportedUTTypes: [UTType] = supportedExtensions.compactMap { UTType(filenameExtension: $0) }
 
+    func closeKeyWindow() {
+        let target = NSApp.keyWindow ?? entries.values.first(where: { $0.window.isVisible })?.window
+        target?.close()
+    }
+
+    func allWindows() -> [(window: NSWindow, context: WindowContext)] {
+        entries.values.map { ($0.window, $0.context) }
+    }
+
     func saveAll() {
         saveWorkItem?.cancel()
         guard !entries.isEmpty else { return }
@@ -65,7 +76,10 @@ final class WindowManager: NSObject {
         let rootView = RootView()
             .environmentObject(tracker)
             .environmentObject(context)
-        window.contentView = NSHostingView(rootView: rootView)
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = .clear
+        window.contentView = hostingView
         window.delegate = self
         tracker.window = window
         tracker.startTracking()
@@ -127,7 +141,7 @@ final class WindowManager: NSObject {
         entries.values.first { $0.window === window }
     }
 
-    private func scheduleSave() {
+private func scheduleSave() {
         saveWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.persist() }
         saveWorkItem = item
@@ -144,7 +158,11 @@ final class WindowManager: NSObject {
                 width: e.window.frame.width,
                 height: e.window.frame.height,
                 baseRotX: e.context.baseRotX,
-                baseRotY: e.context.baseRotY
+                baseRotY: e.context.baseRotY,
+                baseRotZ: e.context.baseRotZ,
+                lockTilt: e.context.lockTilt,
+                lockSpin: e.context.lockSpin,
+                lockRoll: e.context.lockRoll
             )
         }
         if let data = try? JSONEncoder().encode(states) {
@@ -164,6 +182,7 @@ final class WindowManager: NSObject {
 // MARK: - NSWindowDelegate
 
 extension WindowManager: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool { true }
     func windowDidMove(_ notification: Notification) { scheduleSave() }
     func windowDidResize(_ notification: Notification) { scheduleSave() }
 
