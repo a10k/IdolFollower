@@ -1,8 +1,10 @@
 # Idol Follower
 
+A floating 3D model viewer for macOS. Load any 3D model, image, or GIF and it subtly follows your mouse — always on top, fully transparent, no window chrome.
+
 ![preview](preview.gif)
 
-A floating 3D model viewer for macOS. Load any 3D model, image, or GIF and it subtly follows your mouse — always on top, fully transparent, no window chrome.
+**[Download latest release](https://github.com/a10k/IdolFollower/releases/latest)**
 
 ## Requirements
 
