@@ -157,6 +157,7 @@ final class WindowManager: NSObject {
                 modelBookmark: e.context.modelURL.flatMap {
                     try? $0.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
                 },
+                modelPath: e.context.modelURL?.path,
                 x: e.window.frame.origin.x,
                 y: e.window.frame.origin.y,
                 width: e.window.frame.width,

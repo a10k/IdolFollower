@@ -4,6 +4,7 @@ import CoreGraphics
 struct WindowState: Codable {
     var id: String
     var modelBookmark: Data?
+    var modelPath: String?
     var x: Double
     var y: Double
     var width: Double

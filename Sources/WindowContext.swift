@@ -29,17 +29,19 @@ final class WindowContext: ObservableObject {
         ignoresMouse = state.ignoresMouse
         parallaxH = state.parallaxH
         parallaxV = state.parallaxV
-        if let bookmark = state.modelBookmark {
-            var stale = false
-            if let url = try? URL(resolvingBookmarkData: bookmark,
-                                  options: .withSecurityScope,
-                                  relativeTo: nil,
-                                  bookmarkDataIsStale: &stale) {
-                if url.startAccessingSecurityScopedResource() {
-                    securityScopedURL = url
-                }
-                modelURL = url
+        var stale = false
+        if let bookmark = state.modelBookmark,
+           let url = try? URL(resolvingBookmarkData: bookmark,
+                              options: .withSecurityScope,
+                              relativeTo: nil,
+                              bookmarkDataIsStale: &stale) {
+            if url.startAccessingSecurityScopedResource() {
+                securityScopedURL = url
             }
+            modelURL = url
+        } else if let path = state.modelPath,
+                  FileManager.default.fileExists(atPath: path) {
+            modelURL = URL(fileURLWithPath: path)
         }
     }
 }
