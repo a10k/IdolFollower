@@ -20,7 +20,12 @@ swift Scripts/make_icon.swift
 iconutil -c icns /tmp/IdolFollower.iconset -o "$BUNDLE/Contents/Resources/AppIcon.icns"
 
 echo "Signing..."
-codesign --force --deep --sign - "$BUNDLE"
+# For local dev, ad-hoc signing is used. For App Store, replace '-' with:
+#   "3rd Party Mac Developer Application: <Your Name> (<TeamID>)"
+# and ensure the entitlements file is referenced.
+codesign --force --deep --sign - \
+  --entitlements "Idol Follower.entitlements" \
+  "$BUNDLE"
 
 echo ""
 echo "Done: $BUNDLE"

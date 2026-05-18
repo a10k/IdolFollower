@@ -115,7 +115,7 @@ final class WindowManager: NSObject {
         let vis = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1280, height: 800)
         return WindowState(
             id: UUID().uuidString,
-            modelPath: nil,
+            modelBookmark: nil,
             x: vis.midX - size.width / 2,
             y: vis.midY - size.height / 2,
             width: size.width,
@@ -154,7 +154,9 @@ final class WindowManager: NSObject {
         let states: [WindowState] = entries.values.map { e in
             WindowState(
                 id: e.context.id,
-                modelPath: e.context.modelURL?.path,
+                modelBookmark: e.context.modelURL.flatMap {
+                    try? $0.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+                },
                 x: e.window.frame.origin.x,
                 y: e.window.frame.origin.y,
                 width: e.window.frame.width,
@@ -194,6 +196,7 @@ extension WindowManager: NSWindowDelegate {
         guard let window = notification.object as? NSWindow,
               let id = entries.first(where: { $0.value.window === window })?.key else { return }
         entries[id]?.tracker.stopTracking()
+        entries[id]?.context.stopModelAccess()
         contextCancellables.removeValue(forKey: id)
         entries.removeValue(forKey: id)
         if entries.isEmpty {

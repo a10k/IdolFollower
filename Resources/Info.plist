@@ -26,5 +26,7 @@
     <true/>
     <key>LSUIElement</key>
     <false/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Alok Pepakayala. All rights reserved.</string>
 </dict>
 </plist>

@@ -3,7 +3,7 @@ import CoreGraphics
 
 struct WindowState: Codable {
     var id: String
-    var modelPath: String?
+    var modelBookmark: Data?
     var x: Double
     var y: Double
     var width: Double
