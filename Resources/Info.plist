@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.a10k.idolfollower</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>8</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>0.0.8</string>
     <key>CFBundleExecutable</key>
     <string>IdolFollower</string>
     <key>CFBundlePackageType</key>

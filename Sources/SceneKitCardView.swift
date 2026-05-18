@@ -3,6 +3,7 @@ import AppKit
 import SceneKit
 import ImageIO
 
+
 struct SceneKitView: NSViewRepresentable {
     @EnvironmentObject var tracker: MouseTracker
     @EnvironmentObject var windowContext: WindowContext
@@ -112,6 +113,7 @@ struct SceneKitView: NSViewRepresentable {
         coord.windowContext = windowContext
         coord.tracker = tracker
         coord.lastModelURL = windowContext.modelURL  // prevent redundant reload on first updateNSView
+
 
         let sv = IdolSCNView(coordinator: coord)
         let initialScene = Self.makeScene(url: windowContext.modelURL)
